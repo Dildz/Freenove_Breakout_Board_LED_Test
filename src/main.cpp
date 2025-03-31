@@ -4,8 +4,8 @@
   Controller : ESP32-S3-WROOM Board Lite (FNK0099)
 
   Description: - Includes all GPIO pins on the board.
-				       - Wave pattern on both sides going up & down.
-				       - Full spectrum rainbow hue effect on NeoPixel.
+               - Wave pattern using paired left/right LEDs.
+               - Full spectrum rainbow hue effect on NeoPixel.
                - Uses millis() for non-blocking operation.
                - Adjust waveInterval to change wave speed.
 
@@ -15,7 +15,6 @@
                  board & LED functionality.
 ****************************************************************/
 
-
 #include <Arduino.h>
 #include <FastLED.h>
 
@@ -24,11 +23,35 @@
 #define NEOPIX_PIN 48
 CRGB leds[NEOPIX_COUNT];
 
-// GPIO wave pattern configuration
-const int leftPins[] = {4, 5, 6, 7, 16, 17, 18, 8, 3, 46, 9, 10, 11, 12, 13, 14};
-const int rightPins[] = {1, 2, 42, 41, 40, 39, 38, 37, 36, 35, 0, 45, 47, 21, 20, 19}; // skip neopixel pin (48)
-const int leftCount = sizeof(leftPins) / sizeof(leftPins[0]);
-const int rightCount = sizeof(rightPins) / sizeof(rightPins[0]);
+// Define a structure for LED pairs
+struct LEDPair {
+  int leftPin;
+  int rightPin; // -1 means no pair (for pin 10)
+};
+
+// Define LED pairs (opposite left and right pins, use -1 for pin 10's pair)
+const LEDPair ledPairs[] = {
+// L | R 
+  { 4,  1}, // pair 0
+  { 5,  2}, // pair 1
+  { 6, 42}, // pair 2
+  { 7, 41}, // pair 3
+  {15, 40}, // pair 4
+  {16, 39}, // pair 5
+  {17, 38}, // pair 6
+  {18, 37}, // pair 7
+  { 8, 36}, // pair 8
+  { 3, 35}, // pair 9
+  {46,  0}, // pair 10
+  { 9, 45}, // pair 11
+  {10, -1}, // pair 12 (would be 48, using -1)
+  {11, 47}, // pair 13
+  {12, 21}, // pair 14
+  {13, 20}, // pair 15
+  {14, 19}  // pair 16
+};
+
+const int pairCount = 17; // 0-16
 
 // Timing variables
 unsigned long previousWaveTime = 0;
@@ -41,22 +64,23 @@ bool movingDown = true;
 int currentPosition = 0;
 uint8_t hue = 0; // hue value for rainbow (0-255)
 
+// SETUP
 void setup() {
   // Initialize NeoPixel
   FastLED.addLeds<WS2812, NEOPIX_PIN, GRB>(leds, NEOPIX_COUNT);
   FastLED.setBrightness(50);
   
-  // Initialize all GPIO pins
-  for (int i = 0; i < leftCount; i++) {
-    pinMode(leftPins[i], OUTPUT);
-    digitalWrite(leftPins[i], LOW);
-  }
-  for (int i = 0; i < rightCount; i++) {
-    pinMode(rightPins[i], OUTPUT);
-    digitalWrite(rightPins[i], LOW);
+  // Initialize all GPIO pins in the pairs
+  for (int i = 0; i < pairCount; i++) {
+    pinMode(ledPairs[i].leftPin, OUTPUT);
+    
+    if (ledPairs[i].rightPin != -1) {
+      pinMode(ledPairs[i].rightPin, OUTPUT);
+    }
   }
 }
 
+// MAIN LOOP
 void loop() {
   unsigned long currentMillis = millis();
 
@@ -71,31 +95,43 @@ void loop() {
     if (hue >= 255) hue = 0; // reset hue after full spectrum
   }
 
-  // Handle GPIO wave pattern (up/down on both sides)
+  // Handle GPIO wave pattern (up/down with paired LEDs)
   if (currentMillis - previousWaveTime >= waveInterval) {
     previousWaveTime = currentMillis;
     
     // Turn off all GPIO LEDs first
-    for (int i = 0; i < leftCount; i++) digitalWrite(leftPins[i], LOW);
-    for (int i = 0; i < rightCount; i++) digitalWrite(rightPins[i], LOW);
-    
-    // Light current position
-    if (currentPosition < leftCount) digitalWrite(leftPins[currentPosition], HIGH);
-    if (currentPosition < rightCount) digitalWrite(rightPins[currentPosition], HIGH);
-    
-    // Update position
-    if (movingDown) {
-      currentPosition++;
-      if (currentPosition >= max(leftCount, rightCount)) {
-        movingDown = false;
-        currentPosition = min(leftCount, rightCount) - 1;
+    for (int i = 0; i < pairCount; i++) {
+      digitalWrite(ledPairs[i].leftPin, LOW);
+      if (ledPairs[i].rightPin != -1) {
+        digitalWrite(ledPairs[i].rightPin, LOW);
       }
     }
-	else {
-      currentPosition--;
+    
+    // Start with the 1st top pair
+    digitalWrite(ledPairs[currentPosition].leftPin, HIGH);
+    if (ledPairs[currentPosition].rightPin != -1) {
+      digitalWrite(ledPairs[currentPosition].rightPin, HIGH);
+    }
+    
+    // Handle wave direction and position updates
+    if (movingDown) {
+      // Moving down
+      currentPosition++; // move to next position
+      
+      // Check if we've reached the bottom of the board
+      if (currentPosition >= pairCount) {
+          movingDown = false;              // reverse direction (now moving up)
+          currentPosition = pairCount - 1; // stay at last valid position (avoid array overflow)
+      }
+    } 
+    else {
+      // Moving up
+      currentPosition--; // move to previous position
+      
+      // Check if we've reached the top of the board
       if (currentPosition < 0) {
-        movingDown = true;
-        currentPosition = 0;
+          movingDown = true;   // reverse direction (now moving down)
+          currentPosition = 0; // stay at first position (avoid negative index)
       }
     }
   }
